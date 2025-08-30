@@ -1,0 +1,468 @@
+name: Build Kernel
+run-name: >-
+  ${{ format('Build Kernel {0} for munch {1}',
+    (contains(github.event.inputs.kernel_branch, 'susfs') && github.event.inputs.kpm == 'true') && 'with susfs+kpm' ||
+    contains(github.event.inputs.kernel_branch, 'susfs') && 'with susfs' ||
+    github.event.inputs.kpm == 'true' && 'with kpm' ||
+    '',
+    github.event.inputs.ROM != '' && github.event.inputs.ROM || 'AOSP+MIUI'
+  ) }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_branch:
+        description: 'Select kernel branch'
+        required: true
+        default: 'munch_susfs'
+        type: choice
+        options:
+          - munch
+          - munch_susfs
+      ROM:
+        description: 'ROM Type (MIUI, AOSP, or leave blank for both)'
+        default: ''
+        required: false
+        type: choice
+        options:
+          - AOSP
+          - MIUI
+          - ''
+      kpm:
+        description: 'KPM'
+        required: true
+        default: false
+        type: boolean
+      clang:
+        description: 'Clang option'
+        required: true
+        default: 'WeebX Stable 19.1.5'
+        type: choice
+        options:
+          - 'ZyC Stable 16.0.6'
+          - 'WeebX Stable 19.1.5'
+          - 'WeebX Stable 20.0.0git'
+          - 'Custom Clang'
+      custom_clang_url:
+        description: 'Custom Clang URL (required only if Custom Clang selected)'
+        required: false
+        default: ''
+      use_release:
+        description: |
+          Do you want to create a GitHub Release?
+
+          ⚠️ Note: Set the Release Title and Notes in release_config.txt
+        required: false
+        default: false
+        type: boolean
+      release_tag:
+        description: 'Release tag (e.g., v18.2-Artful)'
+        required: true
+        default: 'Kernel_Release'
+        type: string
+      prerelease:
+        description: 'Mark release as a prerelease'
+        required: false
+        default: false
+        type: boolean
+      draft:
+        description: 'Mark release as a draft'
+        required: false
+        default: false
+        type: boolean
+
+  workflow_call:
+    inputs:
+      kernel_branch:
+        description: 'Select kernel branch'
+        required: true
+        type: string
+      ROM:
+        description: 'ROM Type (MIUI/AOSP)'
+        required: true
+        type: string
+      kpm:
+        description: 'KPM'
+        required: true
+        type: boolean
+      clang:
+        description: 'Clang option'
+        required: true
+        type: string
+      release_tag:
+        description: 'Release tag'
+        required: false
+        type: string
+
+timeout-minutes: 120
+
+jobs:
+  set-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - id: set
+        run: |
+          ROM="${{ github.event.inputs.ROM }}"
+          echo "Input ROM: '$ROM'"
+
+          if [[ "$ROM" == "AOSP" ]]; then
+            echo 'matrix={"rom_type":["AOSP"]}' >> $GITHUB_OUTPUT
+            echo "Selected: AOSP only"
+          elif [[ "$ROM" == "MIUI" ]]; then
+            echo 'matrix={"rom_type":["MIUI"]}' >> $GITHUB_OUTPUT
+            echo "Selected: MIUI only"
+          else
+            echo 'matrix={"rom_type":["AOSP","MIUI"]}' >> $GITHUB_OUTPUT
+            echo "Selected: Both AOSP and MIUI"
+          fi
+
+  build:
+    needs: set-matrix
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJson(needs.set-matrix.outputs.matrix) }}
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      CODENAME: munch
+      KERNEL_BRANCH: ${{ inputs.kernel_branch || github.event.inputs.kernel_branch || 'munch_susfs' }}
+      clang: ${{ inputs.clang || github.event.inputs.clang || 'WeebX Stable' }}
+      custom_clang_url: ${{ inputs.custom_clang_url || github.event.inputs.custom_clang_url || '' }}
+      kpm: ${{ inputs.kpm || github.event.inputs.kpm || false }}
+      use_release: ${{ inputs.use_release || github.event.inputs.use_release || false }}
+      release_tag: ${{ inputs.release_tag || github.event.inputs.release_tag || 'Kernel_Release' }}
+      release_title: ${{ inputs.release_title || github.event.inputs.release_title || 'RealKing Kernel' }}
+      prerelease: ${{ inputs.prerelease || github.event.inputs.prerelease || false }}
+      draft: ${{ inputs.draft || github.event.inputs.draft || false }}
+      BUILD_START_TIME: ${{ github.run_started_at }}
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+
+    - name: Clone Kernel Source
+      id: kernel-source
+      run: |
+        echo "Cloning branch $KERNEL_BRANCH"
+        git clone --depth=1 --branch "$KERNEL_BRANCH" \
+        https://x-access-token:${{ secrets.GH_PAT }}@github.com/UdayKumarChunduru/Realking_Kernel.git Kernel
+
+    - name: Process Release Configs
+      id: release-config
+      run: |
+        echo "📦 Processing release Config..."
+        RELEASE_TAG="${{ env.release_tag }}"
+
+        # Release Title
+        release_title=$(grep -v '^#' release_config.txt | head -n 1 | sed "s/\\\$release_tag/$RELEASE_TAG/g")
+        echo "release_title=$release_title" >> $GITHUB_ENV
+
+        # Release Notes
+        awk '!/^#/ {
+          if (!seen++) next
+          print
+        }' release_config.txt | sed "s/\\\$release_tag/$RELEASE_TAG/g" > final_release_notes.txt
+
+        echo "✅ Release title and notes processed!"
+
+    - name: Selected Options
+      id: print-options
+      run: |
+        echo "=============================================="
+        echo "           BUILD CONFIGURATION"
+        echo "=============================================="
+        echo "📱 Device Codename: $CODENAME"
+        echo "📦 ROM Input: ${{ matrix.rom_type }}"
+        echo "🔧 Clang Version: $clang"
+        echo "🔐 SukiSU + KPM: $kpm"
+        echo "🚀 Release: $use_release"
+        echo "🏷️ Release Tag: $release_tag"
+        echo "🔖 Release Title: $release_title"
+        echo "📝 Release Notes:"
+        echo "¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯"
+        cat final_release_notes.txt
+        echo "_______________________________________________"
+        echo "🚧 Pre Release: $prerelease"
+        echo "📃 Draft: $draft"
+        echo ""
+
+        # Show what will be built based on matrix
+        echo "🚀 Building ROM type: ${{ matrix.rom_type }}"
+
+        if [[ "$kpm" == "true" ]]; then
+          echo "🔐 SukiSU + Kernel Patch Manager ENABLED"
+        else
+          echo "🔐 SukiSU + Kernel Patch Manager DISABLED"
+        fi
+
+    - name: Set up environment
+      id: setup-env
+      working-directory: Kernel
+      run: |
+        echo "🛠️ Setting up build environment..."
+        sudo apt-get update
+        # Only install necessary packages (compliance)
+        sudo apt-get install -y --install-recommends jq python3 software-properties-common build-essential libelf-dev libhiredis1.1.0
+
+        chmod +x ../telegram_notify.py
+
+        # Setup time variables
+        TIME="$(date "+%Y%m%d%H%M")"
+        CURRENT_DATE=$(date +"%Y-%m-%d")
+        echo "TIME=$TIME" >> $GITHUB_ENV
+        echo "CURRENT_DATE=$CURRENT_DATE" >> $GITHUB_ENV
+
+        # Kernel zip filename
+        BRANCH_PART=$(echo "$KERNEL_BRANCH" | grep -oi 'susfs' || true | tr '[:upper:]' '[:lower:]')
+        KPM_PART=$([[ "$kpm" == "true" ]] && echo "kpm" || true)
+
+        ZIP_NAME_BASE="RealKing${BRANCH_PART:+-$BRANCH_PART}${KPM_PART:+-$KPM_PART}-$CODENAME"
+
+        echo "📦 Final ZIP name base: $ZIP_NAME_BASE"
+        echo "ZIP_NAME_BASE=$ZIP_NAME_BASE" >> $GITHUB_ENV
+
+        echo "⬇️ Downloading Clang: ${{ env.clang }}"
+
+        if [[ "${{ env.clang }}" == "Custom Clang" ]]; then
+          if [[ -z "${{ env.custom_clang_url }}" ]]; then
+            echo "❌ Error: You selected 'Custom Clang' but didn't provide a URL!"
+            exit 1
+          fi
+          CLANG_URL="${{ env.custom_clang_url }}"
+          echo "🌐 Custom Clang URL provided: $CLANG_URL"
+        else
+          if [[ "${{ env.clang }}" == "ZyC Stable 16.0.6" ]]; then
+            CLANG_URL=$(curl -s https://raw.githubusercontent.com/v3kt0r-87/Clang-Stable/main/clang-zyc.txt)
+          elif [[ "${{ env.clang }}" == "WeebX Stable 19.1.5" ]]; then
+            CLANG_URL=$(curl -s https://raw.githubusercontent.com/v3kt0r-87/Clang-Stable/main/clang-weebx.txt)
+          elif [[ "${{ env.clang }}" == "WeebX Stable 20.0.0git" ]]; then
+            CLANG_URL=$(curl -s https://raw.githubusercontent.com/XSans0/WeebX-Clang/main/main/link.txt)
+          else
+            echo "⚠️ Unknown Clang option selected! Falling back to WeebX Stable 19.1.5"
+            CLANG_URL=$(curl -s https://raw.githubusercontent.com/v3kt0r-87/Clang-Stable/main/clang-weebx.txt)
+          fi
+          echo "📥 Resolved Clang URL: $CLANG_URL"
+        fi
+
+        # Proceed with download and extraction
+        if [[ "$CLANG_URL" == *.tar.gz ]]; then
+          echo "📦 Downloading and extracting .tar.gz archive..."
+          wget --progress=bar:force "$CLANG_URL" -O "clang.tar.gz"
+          mkdir -p clang
+          tar -xvf clang.tar.gz -C clang
+          rm -rf clang.tar.gz
+        elif [[ "$CLANG_URL" == *.tar.zst ]]; then
+          echo "📦 Downloading and extracting .tar.zst archive..."
+          wget --progress=bar:force "$CLANG_URL" -O "clang.tar.zst"
+          mkdir -p clang
+          unzstd -d clang.tar.zst
+          tar -xvf clang.tar -C clang
+          rm -rf clang.tar clang.tar.zst
+        else
+          echo "❌ Unsupported archive type or missing file extension in URL: $CLANG_URL"
+          exit 1
+        fi
+
+        echo "✅ ${{ env.clang }} Clang downloaded and extracted successfully"
+
+        if [[ "${{ env.kpm }}" == "false" ]]; then
+          echo "🔧 Setting up KernelSU-Next with susfs..."
+          bash nextpatch.sh
+          echo "✅ KernelSU-Next setup completed"
+        else
+          echo "🔧 Setting up SukiSU Ultra with susfs..."
+          curl -LSs "https://raw.githubusercontent.com/ShirkNeko/SukiSU-Ultra/main/kernel/setup.sh" | bash -s bdf675b448b169ff6721e1af30b23b904d9757ae
+          cd KernelSU
+          # echo "🔧 Adding other KSU manager support..."
+          # curl -Ls https://raw.githubusercontent.com/KOWX712/files/main/0001-add-other-ksu-manager-support-for-sukisu-ultra.patch | patch -p1
+          cd ..
+          echo "✅ SukiSU Ultra setup completed"
+        fi
+
+    - name: Build Kernel for ${{ matrix.rom_type }}
+      id: build-kernel
+      working-directory: Kernel
+      env:
+        GITHUB_OUTPUT: ${{ github.workspace }}/output_${{ matrix.rom_type }}.txt
+      run: |
+        echo "=============================================="
+        echo "           BUILDING ${{ matrix.rom_type }} KERNEL"
+        echo "=============================================="
+
+        ROM_TYPE_LOWER=$(echo "${{ matrix.rom_type }}" | tr '[:upper:]' '[:lower:]')
+        export ROM_TYPE="$ROM_TYPE_LOWER"
+        export kpm="${{ env.kpm }}"
+        export ZIP_NAME_BASE="$ZIP_NAME_BASE"
+        export TIME="$TIME"
+        chmod +x ../build.sh
+
+        bash ../build.sh
+
+    - name: Capture build outputs
+      run: |
+        echo "📥 Capturing build outputs for ${{ matrix.rom_type }}..."
+        if [ -f "${{ github.workspace }}/output_${{ matrix.rom_type }}.txt" ]; then
+          cat "${{ github.workspace }}/output_${{ matrix.rom_type }}.txt" >> $GITHUB_OUTPUT
+          echo "✅ Outputs captured for ${{ matrix.rom_type }}"
+        else
+          echo "⚠️ No output file found for ${{ matrix.rom_type }}"
+        fi
+
+    - name: Upload ${{ matrix.rom_type }} Artifact
+      id: upload-artifact
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env[format('ZIP_NAME_{0}', matrix.rom_type)] }}
+        path: ${{ env[format('ZIP_PATH_{0}', matrix.rom_type)] }}
+        if-no-files-found: error
+        retention-days: 7
+
+    - name: Build Summary and GitHub Release
+      id: build-github-release
+      if: ${{ always() && env.use_release == 'true' && (github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        echo "=============================================="
+        echo "           BUILD SUMMARY"
+        echo "=============================================="
+        echo "✅ Build process completed!"
+        echo ""
+
+        # Get the correct ZIP path for this matrix job
+        ZIP_PATH_VAR="ZIP_PATH_${{ matrix.rom_type }}"
+        ZIP_PATH="${!ZIP_PATH_VAR}"
+
+        export CURRENT_RUN_ID="${{ github.run_id }}"
+        echo "Workflow Run ID: ${{ github.run_id }}"
+
+        RELEASE_FILES=()
+
+        echo "📊 Build Results:"
+        if [[ -f "$ZIP_PATH" ]]; then
+          echo "✔️ ${{ matrix.rom_type }} Kernel: SUCCESS"
+          RELEASE_FILES+=("$ZIP_PATH")
+          echo "GitHub Releases (zip files only)"
+          echo ""
+          echo "📦 Preparing GitHub Release..."
+
+          # Verify files actually exist before creating release
+          VALID_FILES=()
+          for file in "${RELEASE_FILES[@]}"; do
+            if [ -f "$file" ]; then
+              VALID_FILES+=("$file")
+              echo "✅ Added to release: $(basename "$file")"
+            else
+              echo "❌ File not found: $(basename "$file")"
+            fi
+          done
+
+          if [ ${#VALID_FILES[@]} -eq 0 ]; then
+            echo "❌ No valid build files found for release"
+            exit 1
+          fi
+
+          echo "Release Tag: $release_tag"
+          echo "Release Title: $release_title"
+          echo -e "📋 Files to include in release:"
+          printf "%s\n" "${VALID_FILES[@]}"
+
+          # Check if release already exists from a different workflow run
+          if gh release view "$release_tag" >/dev/null 2>&1; then
+            # Check if this release was created in the current workflow run
+            RELEASE_BODY=$(gh release view "$release_tag" --json body -q .body)
+
+            if [[ "$RELEASE_BODY" == *"Workflow Run ID: $CURRENT_RUN_ID"* ]]; then
+              echo "📦 Adding files to existing release from current workflow..."
+              gh release upload "$release_tag" "${VALID_FILES[@]}" --clobber
+            else
+              echo "❌ Release tag '$release_tag' already exists from a previous run!"
+              echo "❌ Use a different release tag for new builds."
+              exit 1
+            fi
+          else
+            echo "📦 Creating new release..."
+            echo -e "\n\n<!-- Workflow Run ID: ${{ github.run_id }} -->" >> final_release_notes.txt
+            gh release create "$release_tag" \
+              --title "$release_title" \
+              --notes-file final_release_notes.txt \
+              --prerelease=$prerelease \
+              --draft=$draft \
+              "${VALID_FILES[@]}"
+          fi
+
+          FULL_NAME=$(curl -s -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/users/$GITHUB_ACTOR | jq -r '.name // empty')
+          echo "🙋 Uploader: ${FULL_NAME:+$FULL_NAME }@$GITHUB_ACTOR"
+
+          RELEASE_ID=$(gh api repos/${{ github.repository }}/releases/tags/$release_tag --jq '.id')
+          echo "🆔 GitHub Release ID: $RELEASE_ID"
+
+          echo "📌 Commit SHA: ${GITHUB_SHA::7}"
+
+          echo "✅ GitHub Release created successfully!"
+        else
+          echo "❌ ${{ matrix.rom_type }} Kernel: FAILED"
+          echo "❌ No release created (build failed)"
+        fi
+
+    - name: Set build status for Telegram
+      id: set-telegram-status
+      if: always()
+      run: |
+        if [[ "${{ job.status }}" == "success" ]]; then
+          echo "BUILD_STATUS=success" >> $GITHUB_ENV
+        else
+          echo "BUILD_STATUS=failure" >> $GITHUB_ENV
+
+          # Check which step failed
+          if [[ "${{ steps.kernel-source.outcome }}" != "success" ]]; then
+            echo "FAILURE_STAGE=Cloning kernel source" >> $GITHUB_ENV
+            echo "STEP_NUMBER=2" >> $GITHUB_ENV
+          elif [[ "${{ steps.release-config.outcome }}" != "success" ]]; then
+            echo "FAILURE_STAGE=Processing release configs" >> $GITHUB_ENV
+            echo "STEP_NUMBER=3" >> $GITHUB_ENV
+          elif [[ "${{ steps.print-options.outcome }}" != "success" ]]; then
+            echo "FAILURE_STAGE=Printing options" >> $GITHUB_ENV
+            echo "STEP_NUMBER=4" >> $GITHUB_ENV
+          elif [[ "${{ steps.setup-env.outcome }}" != "success" ]]; then
+            echo "FAILURE_STAGE=Setting up environment" >> $GITHUB_ENV
+            echo "STEP_NUMBER=5" >> $GITHUB_ENV
+          elif [[ "${{ steps.build-kernel.outcome }}" != "success" ]]; then
+            echo "FAILURE_STAGE=Building kernel" >> $GITHUB_ENV
+            echo "STEP_NUMBER=6" >> $GITHUB_ENV
+          elif [[ "${{ steps.upload-artifact.outcome }}" != "success" ]]; then
+            echo "FAILURE_STAGE=Uploading artifact" >> $GITHUB_ENV
+            echo "STEP_NUMBER=7" >> $GITHUB_ENV
+          elif [[ "${{ steps.build-github-release.outcome }}" != "success" ]]; then
+            echo "FAILURE_STAGE=Creating GitHub release" >> $GITHUB_ENV
+            echo "STEP_NUMBER=8" >> $GITHUB_ENV
+          else
+            echo "FAILURE_STAGE=Unknown step" >> $GITHUB_ENV
+            echo "STEP_NUMBER=unknown" >> $GITHUB_ENV
+          fi
+
+          echo "ERROR_CODE=1" >> $GITHUB_ENV
+        fi
+
+    - name: Send Telegram notification
+      if: always() && (matrix.rom_type == 'AOSP' || (matrix.rom_type == 'MIUI' && !contains(needs.set-matrix.outputs.matrix, 'AOSP')))
+      env:
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        BUILD_STATUS: ${{ env.BUILD_STATUS }}
+        ROM_TYPE: ${{ matrix.rom_type }}
+        ALL_ROM_TYPES: ${{ join(fromJson(needs.set-matrix.outputs.matrix).rom_type, ',') }}
+        ZIP_PATHS: ${{ env.ZIP_PATH_AOSP || '' }},${{ env.ZIP_PATH_MIUI || '' }}
+        KERNEL_SOURCE_URL: https://github.com/UdayKumarChunduru/Realking_Kernel/tree/${{ env.KERNEL_BRANCH }}
+      run: |
+        echo "📱 Sending Telegram notification..."
+        python3 telegram_notify.py
