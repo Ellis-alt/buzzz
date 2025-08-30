@@ -464,9 +464,7 @@ jobs:
         fi
 
     - name: Send Telegram notification
-      # Run this only once after all matrix jobs complete
       if: always() && (matrix.rom_type == 'AOSP')
-      needs: build
       env:
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -474,13 +472,24 @@ jobs:
       run: |
         echo "📱 Sending Telegram notification..."
         
+        # Wait a bit to ensure all matrix jobs have written their results
+        sleep 10
+        
         # Read all build results
         if [ -f "$GITHUB_WORKSPACE/build_results.txt" ]; then
-          source "$GITHUB_WORKSPACE/build_results.txt"
+          while IFS= read -r line; do
+            if [[ "$line" =~ ^([A-Za-z_]+)=(.*)$ ]]; then
+              export "${BASH_REMATCH[1]}=${BASH_REMATCH[2]}"
+            fi
+          done < "$GITHUB_WORKSPACE/build_results.txt"
         fi
         
         # Determine overall status
         if [[ "$AOSP_STATUS" == "success" && ("$MIUI_STATUS" == "success" || -z "$MIUI_STATUS") ]]; then
+          OVERALL_STATUS="success"
+        elif [[ -z "$MIUI_STATUS" && "$AOSP_STATUS" == "success" ]]; then
+          OVERALL_STATUS="success"
+        elif [[ -z "$AOSP_STATUS" && "$MIUI_STATUS" == "success" ]]; then
           OVERALL_STATUS="success"
         else
           OVERALL_STATUS="failure"
@@ -492,12 +501,28 @@ jobs:
           ZIP_PATHS="$AOSP_ZIP_PATH"
         fi
         if [[ -n "$MIUI_ZIP_PATH" ]]; then
-          ZIP_PATHS="$ZIP_PATHS,$MIUI_ZIP_PATH"
+          if [[ -n "$ZIP_PATHS" ]]; then
+            ZIP_PATHS="$ZIP_PATHS,$MIUI_ZIP_PATH"
+          else
+            ZIP_PATHS="$MIUI_ZIP_PATH"
+          fi
         fi
         
+        # Get the matrix configuration
+        MATRIX_CONFIG='${{ toJson(fromJson(needs.set-matrix.outputs.matrix).rom_type) }}'
+        ALL_ROM_TYPES=$(echo "$MATRIX_CONFIG" | tr -d '["]' | tr ' ' ',')
+        
         # Set environment variables for the Python script
-        echo "BUILD_STATUS=$OVERALL_STATUS" >> $GITHUB_ENV
-        echo "ZIP_PATHS=$ZIP_PATHS" >> $GITHUB_ENV
-        echo "ALL_ROM_TYPES=${{ join(fromJson(needs.set-matrix.outputs.matrix).rom_type, ',') }}" >> $GITHUB_ENV
+        export BUILD_STATUS="$OVERALL_STATUS"
+        export ZIP_PATHS="$ZIP_PATHS"
+        export ALL_ROM_TYPES="$ALL_ROM_TYPES"
+        
+        # Also export individual statuses for detailed reporting
+        if [[ -n "$AOSP_STATUS" ]]; then
+          export AOSP_STATUS="$AOSP_STATUS"
+        fi
+        if [[ -n "$MIUI_STATUS" ]]; then
+          export MIUI_STATUS="$MIUI_STATUS"
+        fi
         
         python3 telegram_notify.py
