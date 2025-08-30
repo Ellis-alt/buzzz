@@ -15,6 +15,8 @@ ALL_ROM_TYPES = os.getenv("ALL_ROM_TYPES", "")
 STATUS = os.getenv("BUILD_STATUS", "failure")
 KERNEL_SOURCE_URL = os.getenv("KERNEL_SOURCE_URL", "")
 ZIP_PATHS = os.getenv("ZIP_PATHS", "").split(",")
+AOSP_STATUS = os.getenv("AOSP_STATUS", "unknown")
+MIUI_STATUS = os.getenv("MIUI_STATUS", "unknown")
 TIME_NOW = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
 
 def telegram_api(method):
@@ -29,18 +31,25 @@ def sizeof_fmt(num, suffix="B"):
 
 def format_status_message():
     status_icon = "✅" if STATUS == "success" else "❌"
-    title = "Build Successful" if STATUS == "success" else "Build Failed"
-
-    # Determine build type
+    
+    # Determine build type and status details
     if "AOSP" in ALL_ROM_TYPES and "MIUI" in ALL_ROM_TYPES:
         build_type = "AOSP + MIUI"
+        aosp_status_icon = "✅" if AOSP_STATUS == "success" else "❌"
+        miui_status_icon = "✅" if MIUI_STATUS == "success" else "❌"
+        status_details = f"{aosp_status_icon} AOSP: {AOSP_STATUS.capitalize()}\n{miui_status_icon} MIUI: {MIUI_STATUS.capitalize()}"
     elif "AOSP" in ALL_ROM_TYPES:
         build_type = "AOSP Only"
+        status_details = f"Status: {AOSP_STATUS.capitalize()}"
     elif "MIUI" in ALL_ROM_TYPES:
         build_type = "MIUI Only"
+        status_details = f"Status: {MIUI_STATUS.capitalize()}"
     else:
         build_type = "Unknown"
-
+        status_details = f"Status: {STATUS.capitalize()}"
+    
+    title = "Build Completed" if STATUS == "success" else "Build Failed"
+    
     return f"""{status_icon} *{title} - {build_type}*
 
 *Build Name:* Kernel Compilation
@@ -51,7 +60,7 @@ def format_status_message():
 *Branch:* `{BRANCH}`
 *Kernel Source:* [Realking_Kernel]({KERNEL_SOURCE_URL})
 
-*Status:* {status_icon} {STATUS.capitalize()}
+{status_details}
 
 🕒 *Time:* {TIME_NOW}
 """.strip()
@@ -103,7 +112,7 @@ def upload_file_with_progress(file_path):
 """
     message_id = send_text_message(upload_msg)
 
-    # Simulate progress (we can't get real upload progress with Telegram API)
+    # Simulate progress
     for progress in range(0, 101, 10):
         progress_text = simulate_progress_bar(progress, (progress/100)*file_size, file_size)
         edit_text_message(message_id, upload_msg + "\n" + progress_text)
@@ -116,7 +125,7 @@ def upload_file_with_progress(file_path):
             data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"📦 `{filename}`"},
             files={"document": (filename, f)},
         )
-
+    
     if response.status_code == 200:
         # Update to show uploaded status briefly, then delete
         uploaded_msg = upload_msg.replace("Uploading...", "✅ Uploaded")
@@ -139,7 +148,7 @@ def main():
     status_message = format_status_message()
     send_text_message(status_message)
 
-    # Only upload files if build was successful
+    # Upload files for successful builds
     if STATUS.lower() == "success":
         for zip_path in ZIP_PATHS:
             zip_path = zip_path.strip()
