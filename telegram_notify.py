@@ -15,8 +15,6 @@ ALL_ROM_TYPES = os.getenv("ALL_ROM_TYPES", "")
 STATUS = os.getenv("BUILD_STATUS", "failure")
 KERNEL_SOURCE_URL = os.getenv("KERNEL_SOURCE_URL", "")
 ZIP_PATHS = os.getenv("ZIP_PATHS", "").split(",")
-AOSP_STATUS = os.getenv("AOSP_STATUS", "unknown")
-MIUI_STATUS = os.getenv("MIUI_STATUS", "unknown")
 TIME_NOW = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
 
 def telegram_api(method):
@@ -31,24 +29,32 @@ def sizeof_fmt(num, suffix="B"):
 
 def format_status_message():
     status_icon = "✅" if STATUS == "success" else "❌"
+    title = "Build Successful" if STATUS == "success" else "Build Failed"
     
-    # Determine build type and status details
-    if "AOSP" in ALL_ROM_TYPES and "MIUI" in ALL_ROM_TYPES:
+    # Determine build type
+    rom_types = ALL_ROM_TYPES.split(",")
+    if len(rom_types) == 2 and "AOSP" in rom_types and "MIUI" in rom_types:
         build_type = "AOSP + MIUI"
-        aosp_status_icon = "✅" if AOSP_STATUS == "success" else "❌"
-        miui_status_icon = "✅" if MIUI_STATUS == "success" else "❌"
-        status_details = f"{aosp_status_icon} AOSP: {AOSP_STATUS.capitalize()}\n{miui_status_icon} MIUI: {MIUI_STATUS.capitalize()}"
-    elif "AOSP" in ALL_ROM_TYPES:
+    elif "AOSP" in rom_types:
         build_type = "AOSP Only"
-        status_details = f"Status: {AOSP_STATUS.capitalize()}"
-    elif "MIUI" in ALL_ROM_TYPES:
+    elif "MIUI" in rom_types:
         build_type = "MIUI Only"
-        status_details = f"Status: {MIUI_STATUS.capitalize()}"
     else:
         build_type = "Unknown"
-        status_details = f"Status: {STATUS.capitalize()}"
     
-    title = "Build Completed" if STATUS == "success" else "Build Failed"
+    # Get individual statuses if available
+    status_details = []
+    if "AOSP" in rom_types:
+        aosp_status = os.getenv("AOSP_STATUS", "unknown")
+        status_icon_aosp = "✅" if aosp_status == "success" else "❌"
+        status_details.append(f"{status_icon_aosp} AOSP")
+    
+    if "MIUI" in rom_types:
+        miui_status = os.getenv("MIUI_STATUS", "unknown")
+        status_icon_miui = "✅" if miui_status == "success" else "❌"
+        status_details.append(f"{status_icon_miui} MIUI")
+    
+    status_detail_text = " | ".join(status_details) if status_details else ""
     
     return f"""{status_icon} *{title} - {build_type}*
 
@@ -60,7 +66,8 @@ def format_status_message():
 *Branch:* `{BRANCH}`
 *Kernel Source:* [Realking_Kernel]({KERNEL_SOURCE_URL})
 
-{status_details}
+*Status:* {status_icon} {STATUS.capitalize()}
+*Build Details:* {status_detail_text}
 
 🕒 *Time:* {TIME_NOW}
 """.strip()
@@ -148,7 +155,7 @@ def main():
     status_message = format_status_message()
     send_text_message(status_message)
 
-    # Upload files for successful builds
+    # Only upload files if build was successful
     if STATUS.lower() == "success":
         for zip_path in ZIP_PATHS:
             zip_path = zip_path.strip()
