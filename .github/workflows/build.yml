@@ -98,8 +98,6 @@ on:
         required: false
         type: string
 
-timeout-minutes: 120
-
 jobs:
   set-matrix:
     runs-on: ubuntu-latest
@@ -127,6 +125,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix: ${{ fromJson(needs.set-matrix.outputs.matrix) }}
+    timeout-minutes: 120
     permissions:
       contents: write
       id-token: write
