@@ -419,11 +419,9 @@ jobs:
       run: |
         if [[ "${{ job.status }}" == "success" ]]; then
           echo "BUILD_STATUS=success" >> $GITHUB_ENV
-          echo "JOB_STATUS_${{ matrix.rom_type }}=success" >> $GITHUB_ENV
         else
           echo "BUILD_STATUS=failure" >> $GITHUB_ENV
-          echo "JOB_STATUS_${{ matrix.rom_type }}=failure" >> $GITHUB_ENV
-          
+
           # Check which step failed
           if [[ "${{ steps.kernel-source.outcome }}" != "success" ]]; then
             echo "FAILURE_STAGE=Cloning kernel source" >> $GITHUB_ENV
@@ -450,79 +448,20 @@ jobs:
             echo "FAILURE_STAGE=Unknown step" >> $GITHUB_ENV
             echo "STEP_NUMBER=unknown" >> $GITHUB_ENV
           fi
-          
+
           echo "ERROR_CODE=1" >> $GITHUB_ENV
         fi
 
-    - name: Collect build results for Telegram
-      if: always()
-      run: |
-        # Create or append to a file that collects all build results
-        echo "${{ matrix.rom_type }}_STATUS=${{ env.BUILD_STATUS }}" >> $GITHUB_WORKSPACE/build_results.txt
-        if [[ -n "${{ env[format('ZIP_PATH_{0}', matrix.rom_type)] }}" ]]; then
-          echo "${{ matrix.rom_type }}_ZIP_PATH=${{ env[format('ZIP_PATH_{0}', matrix.rom_type)] }}" >> $GITHUB_WORKSPACE/build_results.txt
-        fi
-
     - name: Send Telegram notification
-      if: always() && (matrix.rom_type == 'AOSP')
+      if: always() && (matrix.rom_type == 'AOSP' || (matrix.rom_type == 'MIUI' && !contains(needs.set-matrix.outputs.matrix, 'AOSP')))
       env:
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        BUILD_STATUS: ${{ env.BUILD_STATUS }}
+        ROM_TYPE: ${{ matrix.rom_type }}
+        ALL_ROM_TYPES: ${{ join(fromJson(needs.set-matrix.outputs.matrix).rom_type, ',') }}
+        ZIP_PATHS: ${{ env.ZIP_PATH_AOSP || '' }},${{ env.ZIP_PATH_MIUI || '' }}
         KERNEL_SOURCE_URL: https://github.com/UdayKumarChunduru/Realking_Kernel/tree/${{ env.KERNEL_BRANCH }}
       run: |
         echo "📱 Sending Telegram notification..."
-        
-        # Wait a bit to ensure all matrix jobs have written their results
-        sleep 10
-        
-        # Read all build results
-        if [ -f "$GITHUB_WORKSPACE/build_results.txt" ]; then
-          while IFS= read -r line; do
-            if [[ "$line" =~ ^([A-Za-z_]+)=(.*)$ ]]; then
-              export "${BASH_REMATCH[1]}=${BASH_REMATCH[2]}"
-            fi
-          done < "$GITHUB_WORKSPACE/build_results.txt"
-        fi
-        
-        # Determine overall status
-        if [[ "$AOSP_STATUS" == "success" && ("$MIUI_STATUS" == "success" || -z "$MIUI_STATUS") ]]; then
-          OVERALL_STATUS="success"
-        elif [[ -z "$MIUI_STATUS" && "$AOSP_STATUS" == "success" ]]; then
-          OVERALL_STATUS="success"
-        elif [[ -z "$AOSP_STATUS" && "$MIUI_STATUS" == "success" ]]; then
-          OVERALL_STATUS="success"
-        else
-          OVERALL_STATUS="failure"
-        fi
-        
-        # Prepare ZIP paths
-        ZIP_PATHS=""
-        if [[ -n "$AOSP_ZIP_PATH" ]]; then
-          ZIP_PATHS="$AOSP_ZIP_PATH"
-        fi
-        if [[ -n "$MIUI_ZIP_PATH" ]]; then
-          if [[ -n "$ZIP_PATHS" ]]; then
-            ZIP_PATHS="$ZIP_PATHS,$MIUI_ZIP_PATH"
-          else
-            ZIP_PATHS="$MIUI_ZIP_PATH"
-          fi
-        fi
-        
-        # Get the matrix configuration
-        MATRIX_CONFIG='${{ toJson(fromJson(needs.set-matrix.outputs.matrix).rom_type) }}'
-        ALL_ROM_TYPES=$(echo "$MATRIX_CONFIG" | tr -d '["]' | tr ' ' ',')
-        
-        # Set environment variables for the Python script
-        export BUILD_STATUS="$OVERALL_STATUS"
-        export ZIP_PATHS="$ZIP_PATHS"
-        export ALL_ROM_TYPES="$ALL_ROM_TYPES"
-        
-        # Also export individual statuses for detailed reporting
-        if [[ -n "$AOSP_STATUS" ]]; then
-          export AOSP_STATUS="$AOSP_STATUS"
-        fi
-        if [[ -n "$MIUI_STATUS" ]]; then
-          export MIUI_STATUS="$MIUI_STATUS"
-        fi
-        
         python3 telegram_notify.py
