@@ -11,10 +11,9 @@ GITHUB_SERVER_URL = "https://github.com"
 GITHUB_SHA = os.getenv("GITHUB_SHA", "")[:7]
 BRANCH = os.getenv("KERNEL_BRANCH", "unknown")
 ROM_TYPE = os.getenv("ROM_TYPE", "unknown")
-ALL_ROM_TYPES = os.getenv("ALL_ROM_TYPES", "")
 STATUS = os.getenv("BUILD_STATUS", "failure")
 KERNEL_SOURCE_URL = os.getenv("KERNEL_SOURCE_URL", "")
-ZIP_PATHS = os.getenv("ZIP_PATHS", "").split(",")
+ZIP_PATH = os.getenv("ZIP_PATH", "")
 TIME_NOW = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
 
 def telegram_api(method):
@@ -31,32 +30,7 @@ def format_status_message():
     status_icon = "✅" if STATUS == "success" else "❌"
     title = "Build Successful" if STATUS == "success" else "Build Failed"
     
-    # Determine build type
-    rom_types = ALL_ROM_TYPES.split(",")
-    if len(rom_types) == 2 and "AOSP" in rom_types and "MIUI" in rom_types:
-        build_type = "AOSP + MIUI"
-    elif "AOSP" in rom_types:
-        build_type = "AOSP Only"
-    elif "MIUI" in rom_types:
-        build_type = "MIUI Only"
-    else:
-        build_type = "Unknown"
-    
-    # Get individual statuses if available
-    status_details = []
-    if "AOSP" in rom_types:
-        aosp_status = os.getenv("AOSP_STATUS", "unknown")
-        status_icon_aosp = "✅" if aosp_status == "success" else "❌"
-        status_details.append(f"{status_icon_aosp} AOSP")
-    
-    if "MIUI" in rom_types:
-        miui_status = os.getenv("MIUI_STATUS", "unknown")
-        status_icon_miui = "✅" if miui_status == "success" else "❌"
-        status_details.append(f"{status_icon_miui} MIUI")
-    
-    status_detail_text = " | ".join(status_details) if status_details else ""
-    
-    return f"""{status_icon} *{title} - {build_type}*
+    return f"""{status_icon} *{title} - {ROM_TYPE}*
 
 *Build Name:* Kernel Compilation
 *Initiated By:* {GITHUB_ACTOR}
@@ -67,7 +41,6 @@ def format_status_message():
 *Kernel Source:* [Realking_Kernel]({KERNEL_SOURCE_URL})
 
 *Status:* {status_icon} {STATUS.capitalize()}
-*Build Details:* {status_detail_text}
 
 🕒 *Time:* {TIME_NOW}
 """.strip()
@@ -119,7 +92,7 @@ def upload_file_with_progress(file_path):
 """
     message_id = send_text_message(upload_msg)
 
-    # Simulate progress
+    # Simulate progress (we can't get real upload progress with Telegram API)
     for progress in range(0, 101, 10):
         progress_text = simulate_progress_bar(progress, (progress/100)*file_size, file_size)
         edit_text_message(message_id, upload_msg + "\n" + progress_text)
@@ -156,13 +129,8 @@ def main():
     send_text_message(status_message)
 
     # Only upload files if build was successful
-    if STATUS.lower() == "success":
-        for zip_path in ZIP_PATHS:
-            zip_path = zip_path.strip()
-            if zip_path and os.path.exists(zip_path):
-                upload_file_with_progress(zip_path)
-                # Small delay between uploads
-                time.sleep(1)
+    if STATUS.lower() == "success" and ZIP_PATH and os.path.exists(ZIP_PATH):
+        upload_file_with_progress(ZIP_PATH)
 
 if __name__ == "__main__":
     main()
