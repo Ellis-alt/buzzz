@@ -419,9 +419,11 @@ jobs:
       run: |
         if [[ "${{ job.status }}" == "success" ]]; then
           echo "BUILD_STATUS=success" >> $GITHUB_ENV
+          echo "JOB_STATUS_${{ matrix.rom_type }}=success" >> $GITHUB_ENV
         else
           echo "BUILD_STATUS=failure" >> $GITHUB_ENV
-
+          echo "JOB_STATUS_${{ matrix.rom_type }}=failure" >> $GITHUB_ENV
+          
           # Check which step failed
           if [[ "${{ steps.kernel-source.outcome }}" != "success" ]]; then
             echo "FAILURE_STAGE=Cloning kernel source" >> $GITHUB_ENV
@@ -448,81 +450,54 @@ jobs:
             echo "FAILURE_STAGE=Unknown step" >> $GITHUB_ENV
             echo "STEP_NUMBER=unknown" >> $GITHUB_ENV
           fi
-
+          
           echo "ERROR_CODE=1" >> $GITHUB_ENV
         fi
 
-    - name: Set final status for Telegram
-  if: always()
-  run: |
-    # This step runs for both AOSP and MIUI jobs
-    echo "FINAL_STATUS_${{ matrix.rom_type }}=${{ job.status }}" >> $GITHUB_OUTPUT
-    echo "FINAL_ZIP_PATH_${{ matrix.rom_type }}=${{ env[format('ZIP_PATH_%s', matrix.rom_type)] || '' }}" >> $GITHUB_OUTPUT
-
-- name: Send Telegram notification
-  # This will be a separate job that runs after both matrix jobs complete
-  needs: build
-  if: always()
-  runs-on: ubuntu-latest
-  env:
-    TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-    TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-    KERNEL_SOURCE_URL: https://github.com/UdayKumarChunduru/Realking_Kernel/tree/${{ env.KERNEL_BRANCH }}
-  steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 1
-
-    - name: Download all artifacts
-      uses: actions/download-artifact@v4
-      with:
-        path: artifacts
-        pattern: RealKing-*
-        merge-multiple: true
-
-    - name: Prepare notification data
-      id: prepare-notification
+    - name: Collect build results for Telegram
+      if: always()
       run: |
-        # Collect status and file paths from all matrix jobs
-        AOSP_STATUS="${{ needs.build.outputs.FINAL_STATUS_AOSP || 'skipped' }}"
-        MIUI_STATUS="${{ needs.build.outputs.FINAL_STATUS_MIUI || 'skipped' }}"
-        AOSP_ZIP_PATH="${{ needs.build.outputs.FINAL_ZIP_PATH_AOSP || '' }}"
-        MIUI_ZIP_PATH="${{ needs.build.outputs.FINAL_ZIP_PATH_MIUI || '' }}"
-        
-        echo "AOSP_STATUS=$AOSP_STATUS" >> $GITHUB_ENV
-        echo "MIUI_STATUS=$MIUI_STATUS" >> $GITHUB_ENV
-        
-        # Prepare ZIP paths for Telegram
-        ZIP_PATHS=""
-        if [[ -n "$AOSP_ZIP_PATH" && "$AOSP_STATUS" == "success" ]]; then
-          ZIP_PATHS="$AOSP_ZIP_PATH"
-        fi
-        
-        if [[ -n "$MIUI_ZIP_PATH" && "$MIUI_STATUS" == "success" ]]; then
-          if [[ -n "$ZIP_PATHS" ]]; then
-            ZIP_PATHS="$ZIP_PATHS,$MIUI_ZIP_PATH"
-          else
-            ZIP_PATHS="$MIUI_ZIP_PATH"
-          fi
-        fi
-        
-        echo "ZIP_PATHS=$ZIP_PATHS" >> $GITHUB_ENV
-        echo "ALL_ROM_TYPES=AOSP,MIUI" >> $GITHUB_ENV
-        
-        # Determine overall status
-        if [[ "$AOSP_STATUS" == "success" || "$MIUI_STATUS" == "success" ]]; then
-          echo "OVERALL_STATUS=success" >> $GITHUB_ENV
-        else
-          echo "OVERALL_STATUS=failure" >> $GITHUB_ENV
+        # Create or append to a file that collects all build results
+        echo "${{ matrix.rom_type }}_STATUS=${{ env.BUILD_STATUS }}" >> $GITHUB_WORKSPACE/build_results.txt
+        if [[ -n "${{ env[format('ZIP_PATH_{0}', matrix.rom_type)] }}" ]]; then
+          echo "${{ matrix.rom_type }}_ZIP_PATH=${{ env[format('ZIP_PATH_{0}', matrix.rom_type)] }}" >> $GITHUB_WORKSPACE/build_results.txt
         fi
 
     - name: Send Telegram notification
+      # Run this only once after all matrix jobs complete
+      if: always() && (matrix.rom_type == 'AOSP')
+      needs: build
       env:
-        BUILD_STATUS: ${{ env.OVERALL_STATUS }}
-        ROM_TYPE: COMBINED
-        ALL_ROM_TYPES: ${{ env.ALL_ROM_TYPES }}
-        ZIP_PATHS: ${{ env.ZIP_PATHS }}
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        KERNEL_SOURCE_URL: https://github.com/UdayKumarChunduru/Realking_Kernel/tree/${{ env.KERNEL_BRANCH }}
       run: |
         echo "📱 Sending Telegram notification..."
+        
+        # Read all build results
+        if [ -f "$GITHUB_WORKSPACE/build_results.txt" ]; then
+          source "$GITHUB_WORKSPACE/build_results.txt"
+        fi
+        
+        # Determine overall status
+        if [[ "$AOSP_STATUS" == "success" && ("$MIUI_STATUS" == "success" || -z "$MIUI_STATUS") ]]; then
+          OVERALL_STATUS="success"
+        else
+          OVERALL_STATUS="failure"
+        fi
+        
+        # Prepare ZIP paths
+        ZIP_PATHS=""
+        if [[ -n "$AOSP_ZIP_PATH" ]]; then
+          ZIP_PATHS="$AOSP_ZIP_PATH"
+        fi
+        if [[ -n "$MIUI_ZIP_PATH" ]]; then
+          ZIP_PATHS="$ZIP_PATHS,$MIUI_ZIP_PATH"
+        fi
+        
+        # Set environment variables for the Python script
+        echo "BUILD_STATUS=$OVERALL_STATUS" >> $GITHUB_ENV
+        echo "ZIP_PATHS=$ZIP_PATHS" >> $GITHUB_ENV
+        echo "ALL_ROM_TYPES=${{ join(fromJson(needs.set-matrix.outputs.matrix).rom_type, ',') }}" >> $GITHUB_ENV
+        
         python3 telegram_notify.py
