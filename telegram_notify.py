@@ -102,7 +102,7 @@ def upload_file_with_progress(file_path):
     with open(file_path, "rb") as f:
         response = requests.post(
             telegram_api("sendDocument"),
-            data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"📦 `{filename}`"},
+            data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"📦 ```{filename}```"},
             files={"document": (filename, f)},
         )
     
