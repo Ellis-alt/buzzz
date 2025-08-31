@@ -460,7 +460,6 @@ jobs:
         BUILD_STATUS: ${{ env.BUILD_STATUS }}
         ROM_TYPE: ${{ matrix.rom_type }}
         ZIP_PATH: ${{ env[format('ZIP_PATH_{0}', matrix.rom_type)] }}
-        KERNEL_SOURCE_URL: https://github.com/UdayKumarChunduru/Realking_Kernel/tree/${{ env.KERNEL_BRANCH }}
       run: |
         echo "📱 Sending Telegram notification for ${{ matrix.rom_type }}..."
         python3 telegram_notify.py
