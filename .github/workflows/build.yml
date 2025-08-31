@@ -131,6 +131,7 @@ jobs:
       id-token: write
     env:
       CODENAME: munch
+      KERNEL_SOURCE_URL: https://github.com/UdayKumarChunduru/Realking_kernel_sm8250.git
       KERNEL_BRANCH: ${{ inputs.kernel_branch || github.event.inputs.kernel_branch || 'munch_susfs' }}
       clang: ${{ inputs.clang || github.event.inputs.clang || 'WeebX Stable' }}
       custom_clang_url: ${{ inputs.custom_clang_url || github.event.inputs.custom_clang_url || '' }}
@@ -151,8 +152,7 @@ jobs:
       id: kernel-source
       run: |
         echo "Cloning branch $KERNEL_BRANCH"
-        git clone --depth=1 --branch "$KERNEL_BRANCH" \
-        https://github.com/UdayKumarChunduru/Realking_kernel_sm8250.git Kernel
+        git clone --depth=1 --branch "$KERNEL_BRANCH" "$KERNEL_SOURCE_URL" Kernel
 
     - name: Process Release Configs
       id: release-config
@@ -281,9 +281,9 @@ jobs:
           rm -rf KernelSU-Next
           echo "🔧 Setting up SukiSU Ultra with susfs..."
           curl -LSs "https://raw.githubusercontent.com/ShirkNeko/SukiSU-Ultra/main/kernel/setup.sh" | bash -s bdf675b448b169ff6721e1af30b23b904d9757ae
-          # echo "Adding more manager support..."
-          # cp -rf "ksu_more_manager.patch" KernelSU && cd KernelSU && patch -p1 -f < "ksu_more_manager.patch" && cd ..
-          # echo "Done (KSU, MKSU, RKSU, Fork by backslashxx and SukiSU)"
+          echo "Adding more manager support..."
+          cp -rf "ksu_more_manager.patch" KernelSU && cd KernelSU && patch -p1 -f < "ksu_more_manager.patch" && cd ..
+          echo "Done (KSU, MKSU, RKSU, Fork by backslashxx and SukiSU)"
         fi
 
     - name: Build Kernel for ${{ matrix.rom_type }}
@@ -455,8 +455,8 @@ jobs:
     - name: Send Telegram notification
       if: always()
       env:
-        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+        TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         BUILD_STATUS: ${{ env.BUILD_STATUS }}
         ROM_TYPE: ${{ matrix.rom_type }}
         ZIP_PATH: ${{ env[format('ZIP_PATH_{0}', matrix.rom_type)] }}
