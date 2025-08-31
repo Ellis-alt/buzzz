@@ -3,8 +3,8 @@ import requests
 import time
 from datetime import datetime
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+TELEGRAM_TOKEN = os.getenv("TG_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TG_CHAT_ID")
 GITHUB_REPO = os.getenv("GITHUB_REPOSITORY", "unknown/repo")
 GITHUB_ACTOR = os.getenv("GITHUB_ACTOR", "unknown")
 GITHUB_SERVER_URL = "https://github.com"
