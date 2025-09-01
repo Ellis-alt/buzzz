@@ -152,7 +152,9 @@ jobs:
       id: kernel-source
       run: |
         echo "Cloning branch $KERNEL_BRANCH"
-        git clone --depth=1 --branch "$KERNEL_BRANCH" "$KERNEL_SOURCE_URL" Kernel
+        # git clone --depth=1 --branch "$KERNEL_BRANCH" "$KERNEL_SOURCE_URL" Kernel
+        git clone --depth=1 --branch "$KERNEL_BRANCH" \
+        https://x-access-token:${{ secrets.GH_PAT }}@github.com/UdayKumarChunduru/Realking_Kernel.git Kernel
 
     - name: Process Release Configs
       id: release-config
