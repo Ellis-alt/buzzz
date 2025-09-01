@@ -23,6 +23,7 @@ on:
         options:
           - munch
           - munch_susfs
+          - sukisu_susfs_158
           - sukisu_susfs_159
       ROM:
         description: 'ROM Type (MIUI, AOSP, or leave blank for both)'
@@ -283,7 +284,7 @@ jobs:
           rm -rf KernelSU
           rm -rf KernelSU-Next
           echo "🔧 Setting up SukiSU Ultra with susfs..."
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s susfs-main
+          curl -LSs "https://raw.githubusercontent.com/UdayKumarChunduru/SukiSU-Ultra/main/kernel/setup.sh" | bash -s susfs-main
           # echo "Adding more manager support..."
           # cp -rf "ksu_more_manager.patch" KernelSU && cd KernelSU && patch -p1 -f < "ksu_more_manager.patch" && cd ..
           # echo "Done (KSU, MKSU, RKSU, Fork by backslashxx and SukiSU)"
