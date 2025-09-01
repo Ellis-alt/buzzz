@@ -23,7 +23,7 @@ on:
         options:
           - munch
           - munch_susfs
-          - sukisu_susfs_bkp
+          - sukisu_susfs_159
       ROM:
         description: 'ROM Type (MIUI, AOSP, or leave blank for both)'
         default: ''
