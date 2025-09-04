@@ -23,6 +23,7 @@ on:
         options:
           - munch
           - munch_susfs
+          - munch_susfs_bkp
           - sukisu_susfs_158
           - sukisu_susfs_159
       ROM:
