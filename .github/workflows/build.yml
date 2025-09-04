@@ -277,20 +277,22 @@ jobs:
 
         echo "✅ ${{ env.clang }} Clang downloaded and extracted successfully"
 
-        if [[ "${{ env.kpm }}" == "false" ]]; then
-          echo "🔧 Setting up KernelSU-Next with susfs..."
-          bash nextpatch.sh
-          echo "✅ KernelSU-Next setup completed"
-        else
-          rm -rf KernelSU
-          rm -rf KernelSU-Next
-          echo "🔧 Setting up SukiSU Ultra with susfs..."
-          # curl -LSs "https://raw.githubusercontent.com/UdayKumarChunduru/SukiSU-Ultra/main/kernel/setup.sh" | bash -s susfs-main
-          git submodule update --init --remote --merge
-          # echo "Adding more manager support..."
-          # cp -rf "ksu_more_manager.patch" KernelSU && cd KernelSU && patch -p1 -f < "ksu_more_manager.patch" && cd ..
-          # echo "Done (KSU, MKSU, RKSU, Fork by backslashxx and SukiSU)"
-        fi
+        # if [[ "${{ env.kpm }}" == "false" ]]; then
+        #   echo "🔧 Setting up KernelSU-Next with susfs..."
+        #   bash nextpatch.sh
+        #   echo "✅ KernelSU-Next setup completed"
+        # else
+        #   rm -rf KernelSU
+        #   rm -rf KernelSU-Next
+        #   echo "🔧 Setting up SukiSU Ultra with susfs..."
+        #   # curl -LSs "https://raw.githubusercontent.com/UdayKumarChunduru/SukiSU-Ultra/main/kernel/setup.sh" | bash -s susfs-main
+        #   git submodule update --init --remote --merge
+        #   # echo "Adding more manager support..."
+        #   # cp -rf "ksu_more_manager.patch" KernelSU && cd KernelSU && patch -p1 -f < "ksu_more_manager.patch" && cd ..
+        #   # echo "Done (KSU, MKSU, RKSU, Fork by backslashxx and SukiSU)"
+        # fi
+
+        bash managerpatch.sh
 
     - name: Build Kernel for ${{ matrix.rom_type }}
       id: build-kernel
